@@ -1,5 +1,5 @@
-ExternalProject_Add(libxml2
-    GIT_REPOSITORY https://gitlab.gnome.org/GNOME/libxml2.git
+ExternalProject_Add(libudfread
+    GIT_REPOSITORY https://code.videolan.org/videolan/libudfread.git
     SOURCE_DIR ${SOURCE_LOCATION}
     GIT_SHALLOW 1
     UPDATE_COMMAND ""
@@ -7,17 +7,12 @@ ExternalProject_Add(libxml2
         --host=${TARGET_ARCH}
         --prefix=${MINGW_INSTALL_PREFIX}
         --disable-shared
-        --enable-static
-        --with-minimum
-        --with-threads
-        --with-tree
-        --without-lzma
     BUILD_COMMAND ${MAKE}
     INSTALL_COMMAND ${MAKE} install
     LOG_DOWNLOAD 1 LOG_UPDATE 1 LOG_CONFIGURE 1 LOG_BUILD 1 LOG_INSTALL 1
 )
 
-force_rebuild_git(libxml2)
-autogen(libxml2)
-extra_step(libxml2)
-cleanup(libxml2 install)
+force_rebuild_git(libudfread)
+extra_step(libudfread)
+autoreconf(libudfread)
+cleanup(libudfread install)

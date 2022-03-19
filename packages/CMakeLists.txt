@@ -1,24 +1,25 @@
-if(${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.19.0")
-    cmake_policy(SET CMP0114 OLD)
-endif()
-
 function(extra_step _name)
+    # <STAMP_DIR> doesn't resolve into full path, so <LOG_DIR> is used instead since its same folder.
     ExternalProject_Add_Step(${_name} fullclean
-        COMMAND ${EXEC} find <DOWNLOAD_DIR>/${_name}-stamp -type f " ! -iname '*.cmake' " -size 0c -delete # remove 0 byte files which are stamp files
+        COMMAND ${EXEC} find <LOG_DIR> -type f " ! -iname '*.cmake' " -size 0c -delete # remove 0 byte files which are stamp files
+        COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target ${_name}-force-update
         ALWAYS TRUE
         EXCLUDE_FROM_MAIN TRUE
+        INDEPENDENT TRUE
+        LOG 1
         COMMENT "Deleting all stamp files of ${_name} package"
     )
 
     ExternalProject_Add_Step(${_name} liteclean
-        COMMAND ${EXEC} rm -f <DOWNLOAD_DIR>/${_name}-stamp/${_name}-build
-                              <DOWNLOAD_DIR>/${_name}-stamp/${_name}-install
+        COMMAND ${EXEC} rm -f <LOG_DIR>/${_name}-build
+                              <LOG_DIR>/${_name}-install
         ALWAYS TRUE
         EXCLUDE_FROM_MAIN TRUE
+        INDEPENDENT TRUE
+        LOG 1
         COMMENT "Deleting build, install stamp files of ${_name} package"
     )
     ExternalProject_Add_StepTargets(${_name} fullclean liteclean)
-
 endfunction()
 
 function(cleanup _name _last_step)
@@ -30,10 +31,10 @@ function(cleanup _name _last_step)
         if(_build_in_source)
             set(remove_cmd "git -C <SOURCE_DIR> clean -dfx")
         else()
-            set(remove_cmd "rm -rf <BINARY_DIR>")
+            set(remove_cmd "rm -rf <BINARY_DIR>/*")
         endif()
     elseif(_url)
-        set(remove_cmd "rm -rf <SOURCE_DIR> <BINARY_DIR>")
+        set(remove_cmd "rm -rf <SOURCE_DIR>/* <BINARY_DIR>/*")
     endif()
 
     if(ALWAYS_REMOVE_BUILDFILES)
@@ -50,33 +51,69 @@ function(cleanup _name _last_step)
         COMMAND ${EXEC} ${remove_cmd}
         ALWAYS TRUE
         EXCLUDE_FROM_MAIN TRUE
+        INDEPENDENT TRUE
         LOG 1
         COMMENT "Deleting build directory of ${_name} package"
     )
-    ExternalProject_Add_StepTargets(${_name} removebuild)
 
+    ExternalProject_Add_Step(${_name} removeprefix
+        COMMAND ${EXEC} rm -rf <INSTALL_DIR>
+        COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target rebuild_cache
+        COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target ${_name}-force-update
+        ALWAYS TRUE
+        EXCLUDE_FROM_MAIN TRUE
+        INDEPENDENT TRUE
+        LOG 1
+        COMMENT "Deleting everything about ${_name} package"
+    )
+    ExternalProject_Add_StepTargets(${_name} removeprefix removebuild)
 endfunction()
 
 function(force_rebuild_git _name)
     get_property(git_tag TARGET ${_name} PROPERTY _EP_GIT_TAG)
     get_property(git_remote_name TARGET ${_name} PROPERTY _EP_GIT_REMOTE_NAME)
+    get_property(stamp_dir TARGET ${_name} PROPERTY _EP_STAMP_DIR)
+    get_property(source_dir TARGET ${_name} PROPERTY _EP_SOURCE_DIR)
 
     if("${git_remote_name}" STREQUAL "" AND NOT "${git_tag}" STREQUAL "")
         # GIT_REMOTE_NAME is not set when commit hash is specified
-        set(pull "")
+        set(COMMAND_GIT_PULL "")
     else()
         set(git_tag "@{u}")
-        set(pull COMMAND git pull)
+        set(COMMAND_GIT_PULL COMMAND bash -c "git pull > /dev/null"
+                             COMMAND bash -c "git submodule update --remote --recursive > /dev/null")
     endif()
 
+file(WRITE ${stamp_dir}/get_HEAD.sh
+"#!/bin/bash
+if [[ ! -f \"${stamp_dir}/HEAD\" ]]; then exit; fi
+if [[ \"$(cat ${stamp_dir}/HEAD)\" != \"$(git rev-parse --short HEAD)\" ]]; then
+    find \"${stamp_dir}\" -type f  ! -iname '*.cmake'  -size 0c -delete
+    echo \"Updated and remove stamp files.\"
+fi")
+
     ExternalProject_Add_Step(${_name} force-update
-        DEPENDEES download update
-        DEPENDERS patch build install
-        COMMAND git reset --hard ${git_tag}
-        ${pull}
+        ALWAYS TRUE
+        EXCLUDE_FROM_MAIN TRUE
+        INDEPENDENT TRUE
         WORKING_DIRECTORY <SOURCE_DIR>
-        LOG 1
+        COMMAND bash -c "git reset --hard ${git_tag} > /dev/null"
+        ${COMMAND_GIT_PULL}
+        COMMAND chmod 755 ${stamp_dir}/get_HEAD.sh && ${stamp_dir}/get_HEAD.sh
+        COMMAND bash -c "git rev-parse --short HEAD > ${stamp_dir}/HEAD"
     )
+    ExternalProject_Add_StepTargets(${_name} force-update)
+
+    if(EXISTS ${source_dir}/.git)
+        ExternalProject_Add_Step(${_name} check-git
+            DEPENDERS download
+            INDEPENDENT TRUE
+            WORKING_DIRECTORY ${stamp_dir}
+            COMMAND ${CMAKE_COMMAND} -E touch <INSTALL_DIR>/src/${_name}-stamp/${_name}-download
+            COMMAND ${CMAKE_COMMAND} -E copy ${_name}-gitinfo.txt ${_name}-gitclone-lastrun.txt
+            LOG 1
+        )
+    endif()
 endfunction()
 
 function(force_rebuild_svn _name)
@@ -129,6 +166,8 @@ function(force_meson_configure _name)
     )
 endfunction()
 
+set_property(DIRECTORY PROPERTY EP_STEP_TARGETS download)
+
 list(APPEND ep
     gmp
     xz
@@ -162,6 +201,7 @@ list(APPEND ep
     nettle
     libarchive
     freetype2
+    libudfread
     libbluray
     harfbuzz
     libsoxr
@@ -191,6 +231,7 @@ list(APPEND ep
     spirv-tools
     spirv-cross
     glslang
+    vulkan-header
     vulkan
     shaderc
     libepoxy
@@ -213,15 +254,32 @@ list(APPEND ep
     megasdk
 )
 foreach(package IN LISTS ep)
+    if(NOT ${SINGLE_SOURCE_LOCATION} STREQUAL "")
+        set(SOURCE_LOCATION "${SINGLE_SOURCE_LOCATION}/${package}")
+    endif()
     include(${CMAKE_CURRENT_SOURCE_DIR}/${package}.cmake)
-    message(STATUS "Parsing package ${package}")
-endforeach()
+    set(SOURCE_LOCATION "")
 
-set(UPDATE_SCRIPT ${CMAKE_SOURCE_DIR}/scripts/update-repo.sh)
+    get_property(_git_repository TARGET ${package} PROPERTY _EP_GIT_REPOSITORY)
+    if(_git_repository)
+        list(APPEND repo ${package})
+    endif()
+endforeach()
+list(LENGTH ep ep_length)
+message(STATUS "Parsing ${ep_length} packages")
+
+# Exclude packages which dont depend on mpv when update
+list(APPEND removed "flac" "opusfile" "libopusenc" "opus-tools" "termcap" "readline" "cryptopp" "sqlite" "libuv" "libsodium" "megasdk" "libsixel" "curl")
+list(REMOVE_ITEM repo ${removed})
+list(REMOVE_ITEM ep ${removed})
+list(TRANSFORM repo APPEND "-force-update" OUTPUT_VARIABLE update)
+list(TRANSFORM ep APPEND "-download" OUTPUT_VARIABLE download)
+
 add_custom_target(update
-    USES_TERMINAL
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    COMMAND chmod 755 ${UPDATE_SCRIPT}
-    COMMAND ${EXEC} ${UPDATE_SCRIPT}
+    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target ${update}
     COMMENT "Updating git repo"
+)
+
+add_custom_target(download
+    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target ${download}
 )
