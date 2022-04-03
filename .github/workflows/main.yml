@@ -20,11 +20,6 @@ on:
         required: false
         default: true
         type: boolean
-      sourceforge:
-        description: 'Upload to Sourceforge'
-        required: false
-        default: true
-        type: boolean
       github_release:
         description: 'Upload to Github release'
         required: false
@@ -111,22 +106,6 @@ jobs:
           if $BUILD_32BIT; then rm -rf build32/mpv-debug*; ninja -C build32 mpv-packaging; mv build32/mpv*.7z release; fi
           if $BUILD_64BIT; then rm -rf build64/mpv-debug*; ninja -C build64 mpv-packaging; mv build64/mpv*.7z release; fi
 
-      - name: Uploading packages to Sourceforge
-        id: upload_packages_sf
-        if: ${{ steps.packaging_mpv.outcome == 'success' && github.event.inputs.sourceforge == 'true' }}
-        continue-on-error: true
-        run: |
-          mkdir -p /root/.ssh/
-          echo "${{ secrets.SF_PRIVATE_KEY }}" > sf_key
-          ssh-keyscan frs.sourceforge.net > /root/.ssh/known_hosts
-          chmod 400 sf_key
-          chmod -R 700 /root
-          sftp -i sf_key shinchiro@frs.sourceforge.net:/home/frs/project/mpv-player-windows <<END
-          put release/mpv-dev* libmpv
-          put release/mpv-i* 32bit
-          put release/mpv-x* 64bit
-          END
-
       - name: Uploading packages to Github release
         id: upload_packages_gh
         if: ${{ steps.packaging_mpv.outcome == 'success' && github.event.inputs.github_release == 'true' }}
@@ -136,11 +115,11 @@ jobs:
           SHORT_DATE: ${{ env.short_date }}
         run: |
           body=$(cat <<END
-          ![GitHub release (by tag)](https://img.shields.io/github/downloads/shinchiro/mpv-winbuild-cmake/$SHORT_DATE/total?label=Downloads)
+          ![GitHub release (by tag)](https://img.shields.io/github/downloads/porech/mpv-winbuild-cmake/$SHORT_DATE/total?label=Downloads)
           END
           )
-          id=$(curl -u shinchiro:$GH_TOKEN -s -X POST -H "Accept: application/vnd.github.v3+json" https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases -d '{"tag_name":"'$SHORT_DATE'", "body":"'${body// /_}'"}' | jq -r '.id')
-          for file in release/*.7z; do curl -u shinchiro:$GH_TOKEN -X POST -H "Accept: application/vnd.github.v3+json" -H "Content-Type: $(file -b --mime-type $file)" https://uploads.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/$id/assets?name=$(basename $file) --data-binary @$file; done
+          id=$(curl -u ale-rinaldi:$GH_TOKEN -s -X POST -H "Accept: application/vnd.github.v3+json" https://api.github.com/repos/porech/mpv-winbuild-cmake/releases -d '{"tag_name":"'$SHORT_DATE'", "body":"'${body// /_}'"}' | jq -r '.id')
+          for file in release/*.7z; do curl -u ale-rinaldi:$GH_TOKEN -X POST -H "Accept: application/vnd.github.v3+json" -H "Content-Type: $(file -b --mime-type $file)" https://uploads.github.com/repos/porech/mpv-winbuild-cmake/releases/$id/assets?name=$(basename $file) --data-binary @$file; done
 
       - name: Collecting logs
         id: collect_logs
