@@ -225,6 +225,8 @@ list(APPEND ep
     libsrt
     libopenmpt
     ffmpeg
+    tre
+    jack2
     angle-headers
     mujs
     spirv-headers

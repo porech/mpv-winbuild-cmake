@@ -60,6 +60,7 @@ ExternalProject_Add(mpv-release
         --enable-spirv-cross
         --enable-vulkan
         --enable-vapoursynth
+        --enable-jack
         --prefix=${MINGW_INSTALL_PREFIX}
     BUILD_COMMAND ${EXEC} <SOURCE_DIR>/waf
     INSTALL_COMMAND ""

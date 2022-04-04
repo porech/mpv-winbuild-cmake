@@ -2,6 +2,7 @@ ExternalProject_Add(mpv
     DEPENDS
         angle-headers
         ffmpeg
+        jack2
         fribidi
         lcms2
         libarchive
@@ -49,6 +50,7 @@ ExternalProject_Add(mpv
         --enable-spirv-cross
         --enable-vulkan
         --enable-vapoursynth
+        --enable-jack
         --prefix=${MINGW_INSTALL_PREFIX}
     BUILD_COMMAND ${EXEC} <SOURCE_DIR>/waf
     INSTALL_COMMAND ""
